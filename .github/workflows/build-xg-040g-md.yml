@@ -143,6 +143,11 @@ jobs:
           CONFIG_PACKAGE_luci-app-zerotier=y
           CONFIG_PACKAGE_zerotier=y
 
+          # ========== Turbo ACC 网络加速 (NPU 硬件加速管理面板) ==========
+          CONFIG_PACKAGE_luci-app-turboacc=y
+          CONFIG_PACKAGE_shortcut-fe=y
+          CONFIG_PACKAGE_shortcut-fe-drv=y
+
           # ========== OpenClash 科学上网 ==========
           CONFIG_PACKAGE_luci-app-openclash=y
           CONFIG_PACKAGE_dnsmasq-full=y
