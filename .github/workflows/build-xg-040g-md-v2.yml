@@ -64,13 +64,20 @@ jobs:
           echo ">>> feeds.conf.default content:"
           cat feeds.conf.default
 
-          # === 更新所有 feeds (含重试) ===
+          # === 更新所有 feeds (含重试，3次全失败则中止) ===
+          FEEDS_OK=false
           for i in 1 2 3; do
-            ./scripts/feeds update -a && break || {
-              echo ">>> feeds update attempt $i failed, retrying in 30s..."
-              sleep 30
-            }
+            if ./scripts/feeds update -a; then
+              FEEDS_OK=true
+              break
+            fi
+            echo ">>> feeds update attempt $i failed, retrying in 30s..."
+            sleep 30
           done
+          if [ "$FEEDS_OK" = false ]; then
+            echo "!!! 错误：feeds update 3 次全部失败，中止编译"
+            exit 1
+          fi
 
           # === 删除可能冲突的包 ===
           rm -rf feeds/luci/applications/luci-app-mosdns 2>/dev/null || true
@@ -147,6 +154,7 @@ jobs:
 
           # ========== Turbo ACC 网络加速 (NPU 硬件加速管理面板) ==========
           CONFIG_PACKAGE_luci-app-turboacc=y
+          CONFIG_PACKAGE_luci-i18n-turboacc-zh-cn=y
           CONFIG_PACKAGE_shortcut-fe=y
           CONFIG_PACKAGE_kmod-shortcut-fe=y
 
@@ -235,7 +243,16 @@ jobs:
 
       - name: Download sources
         run: |
-          make download -j$(nproc) V=s
+          set -e
+          for i in 1 2 3; do
+            if make download -j$(nproc) V=s; then
+              exit 0
+            fi
+            echo ">>> make download attempt $i failed, retrying in 30s..."
+            sleep 30
+          done
+          echo "!!! 错误：make download 3 次全部失败"
+          exit 1
 
       - name: Compile firmware
         run: |
@@ -276,7 +293,7 @@ jobs:
           body: |
             ## 🤖 ImmortalWrt XG-040G-MD 自动编译固件
 
-            - 📅 编译日期：${{ github.event.repository.updated_at }}
+            - 📅 编译日期：$(date +%Y-%m-%d)
             - 🔧 源码分支：${{ env.REPO_BRANCH }}
             - 🎯 目标设备：Nokia XG-040G-MD (UBI)
             - 🖥️ 平台：Airoha AN7581 (ARM64 Cortex-A53)
