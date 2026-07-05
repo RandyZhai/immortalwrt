@@ -69,19 +69,26 @@ define Build/InstallDev
 	$(CP) \
 		$(PKG_INSTALL_DIR)/usr/lib/pkgconfig/* \
 		$(1)/usr/lib/pkgconfig/
-	$(SED) 's,includedir=.*,includedir=$$$${prefix}/include,' $(1)/usr/lib/pkgconfig/libffi.pc
+	# Ensure pkgconfig uses a literal ${prefix} in the includedir entry
+	# Use $${prefix} so Make emits ${prefix} into the shell command argument
+	$(SED) 's,includedir=.*,includedir=$${prefix}/include,' $(1)/usr/lib/pkgconfig/libffi.pc
 
 	$(INSTALL_DIR) $(1)/usr/include
 	$(CP) \
 		$(PKG_INSTALL_DIR)/usr/include/*.h \
 		$(1)/usr/include/
-	FFICONFIG=$$(find $(PKG_BUILD_DIR) -maxdepth 2 -name "fficonfig.h" -type f | head -1); \
-		if [ -n "$$FFICONFIG" ]; then \
-			$(CP) $$FFICONFIG $(1)/usr/include/; \
-		else \
-			echo "ERROR: fficonfig.h not found in $(PKG_BUILD_DIR)" >&2; \
-			exit 1; \
-		fi
+	# Locate fficonfig.h reliably and copy it into the staged include dir.
+	# Try common locations: build tree first, then the install dir as fallback.
+	FFICONFIG="$$(find $(PKG_BUILD_DIR) -maxdepth 3 -name "fficonfig.h" -type f | head -1)"; \
+	if [ -z "$$FFICONFIG" ] && [ -f "$(PKG_INSTALL_DIR)/usr/include/fficonfig.h" ]; then \
+		FFICONFIG="$(PKG_INSTALL_DIR)/usr/include/fficonfig.h"; \
+	fi; \
+	if [ -n "$$FFICONFIG" ] && [ -f "$$FFICONFIG" ]; then \
+		$(CP) "$$FFICONFIG" "$(1)/usr/include/"; \
+	else \
+		echo "ERROR: fficonfig.h not found in $(PKG_BUILD_DIR) or in $(PKG_INSTALL_DIR)/usr/include" >&2; \
+		exit 1; \
+	fi
 endef
 
 define Package/libffi/install
