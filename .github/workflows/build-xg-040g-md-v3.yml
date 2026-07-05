@@ -84,16 +84,6 @@ jobs:
             exit 1
           fi
 
-          # === 修复上游 bug: libffi cross-compile fficonfig.h 查找失败 ===
-          LIBFFI_MK="feeds/packages/libs/libffi/Makefile"
-          if [ -f "$LIBFFI_MK" ] && grep -q "GNU_TARGET_NAME.*fficonfig.h" "$LIBFFI_MK"; then
-            echo ">>> 修复 libffi Makefile — 将 glob 模式替换为 find 命令"
-            sed -i 's|.*GNU_TARGET_NAME.*fficonfig.h.*|	find $(PKG_BUILD_DIR) -maxdepth 2 -name "fficonfig.h" -type f -exec cp {} $(1)/usr/include/ \\;|' "$LIBFFI_MK"
-            echo ">>> libffi 修复完成"
-          else
-            echo ">>> libffi Makefile 无此 bug，跳过修复"
-          fi
-
           # === 删除可能冲突的包 ===
           rm -rf feeds/luci/applications/luci-app-mosdns 2>/dev/null || true
           rm -rf feeds/packages/net/{alist,adguardhome,mosdns,xray*,v2ray*,sing*,smartdns} 2>/dev/null || true
