@@ -75,7 +75,13 @@ define Build/InstallDev
 	$(CP) \
 		$(PKG_INSTALL_DIR)/usr/include/*.h \
 		$(1)/usr/include/
-	find $(PKG_BUILD_DIR) -maxdepth 2 -name "fficonfig.h" -type f -exec cp {} $(1)/usr/include/ \;
+	FFICONFIG=$$(find $(PKG_BUILD_DIR) -maxdepth 2 -name "fficonfig.h" -type f | head -1); \
+		if [ -n "$$FFICONFIG" ]; then \
+			$(CP) $$FFICONFIG $(1)/usr/include/; \
+		else \
+			echo "ERROR: fficonfig.h not found in $(PKG_BUILD_DIR)" >&2; \
+			exit 1; \
+		fi
 endef
 
 define Package/libffi/install
