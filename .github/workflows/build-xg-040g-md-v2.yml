@@ -1,4 +1,4 @@
-name: Build XG-040G-MD ImmortalWrt
+name: Build XG-040G-MD v2 (iStore+ZT+Docker+Clash+Turbo)
 
 on:
   workflow_dispatch:
