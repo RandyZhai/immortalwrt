@@ -1,4 +1,4 @@
-name: Build XG-040G-MD Docker ZT OpenClash NPU
+name: Build XG-040G-MD Docker ZT OpenClash
 
 "on":
   workflow_dispatch:
@@ -44,6 +44,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo ">>> Disk space before cleanup"
           df -h
           sudo rm -rf /usr/local/lib/android || true
           sudo rm -rf /usr/share/dotnet || true
@@ -51,6 +52,7 @@ jobs:
           sudo rm -rf /usr/local/share/boost || true
           sudo apt-get clean
           sudo docker system prune --all --force --volumes || true
+          echo ">>> Disk space after cleanup"
           df -h
 
       - name: Install build dependencies
@@ -90,24 +92,22 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo ">>> Original feeds.conf.default"
+          echo ">>> feeds.conf.default"
           cat feeds.conf.default
 
-          # 确保仅使用源码自带官方 feeds
-          sed -i '/kenzok8\/openwrt-packages/d' feeds.conf.default
-          sed -i '/kenzok8\/small/d' feeds.conf.default
-          sed -i '/vernesong\/OpenClash/d' feeds.conf.default
-
-          echo ">>> Official feeds only"
-          cat feeds.conf.default
+          # 安全检查：不允许第三方 feeds 混入本次构建。
+          if grep -Eq 'kenzok8|small-package|vernesong|src-git[[:space:]]+kenzo|src-git[[:space:]]+small' feeds.conf.default; then
+            echo "!!! Third-party feed detected"
+            exit 1
+          fi
 
           FEEDS_OK=false
           for attempt in 1 2 3; do
+            echo ">>> feeds update attempt ${attempt}/3"
             if ./scripts/feeds update -a; then
               FEEDS_OK=true
               break
             fi
-            echo ">>> feeds update attempt ${attempt} failed"
             sleep 30
           done
 
@@ -118,15 +118,14 @@ jobs:
 
           ./scripts/feeds install -a
 
-          # giflib 必须来自官方 packages feed
+          # 只验证定义是否存在，不单独编译任何目标包。
           test -f feeds/packages/libs/giflib/Makefile
-          ./scripts/feeds install -p packages -f giflib
-          test -e package/feeds/packages/giflib
+          test -f feeds/packages/utils/dockerd/Makefile
+          test -f feeds/luci/applications/luci-app-dockerman/Makefile
+          test -f feeds/luci/applications/luci-app-openclash/Makefile
+          test -f feeds/luci/applications/luci-app-zerotier/Makefile
 
-          echo ">>> Official giflib source"
-          readlink -f package/feeds/packages/giflib
-          grep -E '^(PKG_NAME|PKG_VERSION|PKG_RELEASE):=' \
-            feeds/packages/libs/giflib/Makefile || true
+          echo ">>> Official package definitions verified"
 
       - name: Generate build configuration
         shell: bash
@@ -137,18 +136,13 @@ jobs:
           cat > .config <<'EOF'
           CONFIG_CCACHE=y
 
-          # Target: Nokia XG-040G-MD UBI
+          # Nokia XG-040G-MD UBI
           CONFIG_TARGET_airoha=y
           CONFIG_TARGET_airoha_an7581=y
           CONFIG_TARGET_airoha_an7581_DEVICE_nokia_xg-040g-md-ubi=y
 
-          # LuCI
+          # LuCI and Chinese interface
           CONFIG_PACKAGE_luci=y
-          CONFIG_PACKAGE_luci-base=y
-          CONFIG_PACKAGE_luci-mod-admin-full=y
-          CONFIG_PACKAGE_luci-mod-network=y
-          CONFIG_PACKAGE_luci-mod-status=y
-          CONFIG_PACKAGE_luci-mod-system=y
           CONFIG_PACKAGE_luci-compat=y
           CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
           CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
@@ -157,73 +151,51 @@ jobs:
           CONFIG_PACKAGE_luci-theme-argon=y
           CONFIG_PACKAGE_luci-app-argon-config=y
 
-          # Official giflib
-          CONFIG_PACKAGE_giflib=y
-
           # ZeroTier
           CONFIG_PACKAGE_zerotier=y
           CONFIG_PACKAGE_luci-app-zerotier=y
 
-          # Docker and Dockerman
+          # Docker and LuCI management
           CONFIG_PACKAGE_docker=y
           CONFIG_PACKAGE_dockerd=y
           CONFIG_PACKAGE_luci-app-dockerman=y
-          CONFIG_PACKAGE_kmod-veth=y
 
-          # OpenClash
+          # OpenClash. Its official Makefile resolves runtime dependencies.
           CONFIG_PACKAGE_luci-app-openclash=y
           CONFIG_PACKAGE_dnsmasq=n
           CONFIG_PACKAGE_dnsmasq-full=y
-          CONFIG_PACKAGE_bash=y
-          CONFIG_PACKAGE_ca-bundle=y
-          CONFIG_PACKAGE_curl=y
-          CONFIG_PACKAGE_ip-full=y
-          CONFIG_PACKAGE_ruby=y
-          CONFIG_PACKAGE_ruby-yaml=y
-          CONFIG_PACKAGE_unzip=y
-          CONFIG_PACKAGE_kmod-tun=y
-          CONFIG_PACKAGE_kmod-inet-diag=y
-          CONFIG_PACKAGE_kmod-nft-tproxy=y
 
-          # Native Airoha acceleration
-
-          # USB storage
+          # USB storage for Docker data_root after installation
           CONFIG_PACKAGE_block-mount=y
           CONFIG_PACKAGE_blockd=y
+          CONFIG_PACKAGE_e2fsprogs=y
           CONFIG_PACKAGE_fdisk=y
           CONFIG_PACKAGE_lsblk=y
-          CONFIG_PACKAGE_e2fsprogs=y
-          CONFIG_PACKAGE_resize2fs=y
           CONFIG_PACKAGE_kmod-usb-storage=y
           CONFIG_PACKAGE_kmod-usb-storage-uas=y
           CONFIG_PACKAGE_kmod-fs-ext4=y
-          CONFIG_PACKAGE_kmod-fs-vfat=y
-          CONFIG_PACKAGE_kmod-fs-exfat=y
-          CONFIG_PACKAGE_kmod-fs-ntfs3=y
-          CONFIG_PACKAGE_kmod-nls-cp437=y
-          CONFIG_PACKAGE_kmod-nls-iso8859-1=y
           CONFIG_PACKAGE_kmod-nls-utf8=y
 
-          # USB network and serial
+          # USB network and serial support
           CONFIG_PACKAGE_kmod-usb-net=y
           CONFIG_PACKAGE_kmod-usb-net-rndis=y
           CONFIG_PACKAGE_kmod-usb-serial=y
           CONFIG_PACKAGE_kmod-usb-serial-ftdi=y
           CONFIG_PACKAGE_kmod-usb-serial-pl2303=y
 
-          # Utilities
+          # Administration tools
           CONFIG_PACKAGE_luci-app-ttyd=y
           CONFIG_PACKAGE_luci-app-commands=y
           CONFIG_PACKAGE_openssh-sftp-server=y
+          CONFIG_PACKAGE_curl=y
           CONFIG_PACKAGE_wget-ssl=y
+          CONFIG_PACKAGE_bash=y
           CONFIG_PACKAGE_nano=y
           CONFIG_PACKAGE_htop=y
           CONFIG_PACKAGE_iperf3=y
-          CONFIG_PACKAGE_resolveip=y
           CONFIG_PACKAGE_ethtool=y
 
-          # Follow ImmortalWrt master package-manager defaults.
-          # Do not force opkg and do not disable APK.
+          # Follow ImmortalWrt master defaults for APK/opkg and kernel internals.
           EOF
 
           make defconfig
@@ -233,36 +205,33 @@ jobs:
         run: |
           set -euo pipefail
 
-          grep -q '^CONFIG_TARGET_airoha=y$' .config
-          grep -q '^CONFIG_TARGET_airoha_an7581=y$' .config
-          grep -q '^CONFIG_TARGET_airoha_an7581_DEVICE_nokia_xg-040g-md-ubi=y$' .config
-
-          REQUIRED_PACKAGES="
-          luci
-          giflib
-          docker
-          dockerd
-          luci-app-dockerman
-          zerotier
-          luci-app-zerotier
-          luci-app-openclash
-          dnsmasq-full
-          luci-theme-argon
-          luci-app-argon-config
-          kmod-veth
-          kmod-usb-storage
-          kmod-usb-storage-uas
-          kmod-fs-ext4
-          kmod-tun
+          REQUIRED_CONFIGS="
+          CONFIG_TARGET_airoha
+          CONFIG_TARGET_airoha_an7581
+          CONFIG_TARGET_airoha_an7581_DEVICE_nokia_xg-040g-md-ubi
+          CONFIG_PACKAGE_luci
+          CONFIG_PACKAGE_luci-theme-argon
+          CONFIG_PACKAGE_luci-app-argon-config
+          CONFIG_PACKAGE_zerotier
+          CONFIG_PACKAGE_luci-app-zerotier
+          CONFIG_PACKAGE_docker
+          CONFIG_PACKAGE_dockerd
+          CONFIG_PACKAGE_luci-app-dockerman
+          CONFIG_PACKAGE_luci-app-openclash
+          CONFIG_PACKAGE_dnsmasq-full
+          CONFIG_PACKAGE_block-mount
+          CONFIG_PACKAGE_kmod-usb-storage
+          CONFIG_PACKAGE_kmod-usb-storage-uas
+          CONFIG_PACKAGE_kmod-fs-ext4
           "
 
           MISSING=""
-          for package_name in $REQUIRED_PACKAGES; do
-            if grep -q "^CONFIG_PACKAGE_${package_name}=y$" .config; then
-              echo "OK: ${package_name}"
+          for symbol in $REQUIRED_CONFIGS; do
+            if grep -q "^${symbol}=y$" .config; then
+              echo "OK: ${symbol}"
             else
-              echo "MISSING: ${package_name}"
-              MISSING="${MISSING} ${package_name}"
+              echo "MISSING: ${symbol}"
+              MISSING="${MISSING} ${symbol}"
             fi
           done
 
@@ -271,14 +240,18 @@ jobs:
             exit 1
           fi
 
-          if [ -n "$MISSING" ]; then
-            echo "!!! Missing required packages:${MISSING}"
+          if grep -Eq 'CONFIG_PACKAGE_(luci-app-store|luci-app-turboacc|shortcut-fe)=y' .config; then
+            echo "!!! Removed third-party package was unexpectedly selected"
             exit 1
           fi
 
-          echo ">>> Package manager selected by master"
-          grep -E '^(CONFIG_USE_APK|CONFIG_PACKAGE_apk|CONFIG_PACKAGE_opkg)=' \
-            .config || true
+          if [ -n "$MISSING" ]; then
+            echo "!!! Required configuration missing:${MISSING}"
+            exit 1
+          fi
+
+          echo ">>> Package manager selected by ImmortalWrt master"
+          grep -E '^(CONFIG_USE_APK|CONFIG_PACKAGE_apk|CONFIG_PACKAGE_opkg)=' .config || true
 
       - name: Download sources
         shell: bash
@@ -288,11 +261,11 @@ jobs:
           DOWNLOAD_OK=false
 
           for attempt in 1 2 3; do
+            echo ">>> download attempt ${attempt}/3"
             if make download -j"$(nproc)" V=s; then
               DOWNLOAD_OK=true
               break
             fi
-            echo ">>> download attempt ${attempt} failed"
             sleep 30
           done
 
@@ -303,34 +276,14 @@ jobs:
 
           find dl -type f -size -1024c -print -delete || true
 
-      - name: Precompile official giflib
-        shell: bash
-        timeout-minutes: 30
-        run: |
-          set -euo pipefail
-          make package/feeds/packages/giflib/clean V=sc
-          make package/feeds/packages/giflib/compile -j1 V=sc
-
-          find staging_dir build_dir \
-            -type f \
-            -name 'libgif.so*' \
-            -print || true
-
-          if ! find staging_dir \
-            -type f \
-            -name 'libgif.so*' \
-            -print \
-            -quit | grep -q .; then
-            echo "!!! giflib compiled but libgif.so was not staged"
-            exit 1
-          fi
-
       - name: Compile firmware
         shell: bash
         timeout-minutes: 360
         run: |
           set -o pipefail
 
+          # Do not precompile giflib or other leaf packages here.
+          # Full make establishes the correct tools, toolchain and host-package order.
           if make -j"$(nproc)" V=s 2>&1 | tee build-parallel.log; then
             echo ">>> Parallel build completed"
           else
@@ -360,11 +313,7 @@ jobs:
           rm -rf "$ARTIFACT_DIR"
           mkdir -p "$ARTIFACT_DIR"
 
-          if [ ! -d "$TARGET_DIR" ]; then
-            echo "!!! Missing target output directory: $TARGET_DIR"
-            find bin/targets -maxdepth 3 -type d -print || true
-            exit 1
-          fi
+          test -d "$TARGET_DIR"
 
           find "$TARGET_DIR" \
             -maxdepth 1 \
@@ -396,8 +345,9 @@ jobs:
             echo "GitHub run ID: ${GITHUB_RUN_ID}"
           } > "$ARTIFACT_DIR/build-information.txt"
 
-          if [ -z "$(find "$ARTIFACT_DIR" -maxdepth 1 -type f -print -quit)" ]; then
-            echo "!!! No artifacts found"
+          if ! find "$ARTIFACT_DIR" -maxdepth 1 -type f -name '*sysupgrade.itb' -print -quit | grep -q .; then
+            echo "!!! XG-040G-MD UBI sysupgrade.itb was not generated"
+            ls -lah "$TARGET_DIR"
             exit 1
           fi
 
@@ -429,7 +379,6 @@ jobs:
             - 编译日期：${{ env.BUILD_DATE }}
             - 源码分支：${{ env.REPO_BRANCH }}
             - 源码版本：${{ env.SHORT_COMMIT }}
-            - 目标平台：Airoha AN7581
             - 目标设备：Nokia XG-040G-MD UBI
 
             ### 内置功能
@@ -438,25 +387,20 @@ jobs:
             - ZeroTier
             - OpenClash
             - Argon 主题
-            - Airoha 设备官方驱动与 UBI 设备配置
-            - USB 存储与 UAS
-            - ext4、exFAT、VFAT 和 NTFS3
+            - USB 存储与 ext4
             - 中文 LuCI
-            - ttyd 和 OpenSSH SFTP
+            - ttyd 与 OpenSSH SFTP
 
             ### Docker 存储
 
-            刷机后建议将 USB 存储格式化为 ext4，通过 UUID 配置开机自动挂载，
-            再将 Docker Root Dir 修改为 `/mnt/sda1/docker`。
+            刷机后先用 UUID 配置 USB ext4 分区自动挂载，
+            再将 Docker Root Dir 设置到 USB，例如 `/mnt/sda1/docker`。
 
-            ### 已取消
+            ### 构建原则
 
-            - iStore
-            - kenzo feed
-            - small feed
-            - TurboACC
-            - Shortcut-FE
-            - docker-compose
+            - 仅使用 ImmortalWrt 官方 feeds
+            - 不包含 iStore、kenzo、small、TurboACC 或 Shortcut-FE
+            - 不强制 opkg，跟随 ImmortalWrt master 默认包管理器
 
             刷机前请完整备份原厂分区，并准备 USB-TTL 救砖环境。
         env:
