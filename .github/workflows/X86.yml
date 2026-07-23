@@ -1,6 +1,6 @@
 name: Build x86-generic AR9285 L2TP OpenClash
 
-"on":
+on:
   workflow_dispatch:
     inputs:
       upload_release:
@@ -49,6 +49,7 @@ jobs:
           sudo rm -rf /usr/local/share/boost || true
           sudo apt-get clean >/dev/null 2>&1 || true
           sudo docker system prune --all --force --volumes >/dev/null 2>&1 || true
+          df -h
 
       - name: Install build dependencies
         shell: bash
@@ -94,7 +95,7 @@ jobs:
             immortalwrt-${{ env.REPO_BRANCH }}-${{ env.TARGET }}-${{ env.SUBTARGET }}-
             immortalwrt-${{ env.REPO_BRANCH }}-
 
-      - name: Update official feeds
+      - name: Update and install official feeds
         shell: bash
         run: |
           set -euo pipefail
@@ -103,6 +104,7 @@ jobs:
 
           FEEDS_OK=false
           for attempt in 1 2 3; do
+            echo "Feeds update attempt ${attempt}" >>"$LOG"
             if ./scripts/feeds update -a >>"$LOG" 2>&1; then
               FEEDS_OK=true
               break
@@ -112,38 +114,97 @@ jobs:
 
           if [ "$FEEDS_OK" != "true" ]; then
             echo "::error::Official feeds update failed after 3 attempts"
-            grep -Ei '(error|failed|fatal|not found|does not exist)' "$LOG" | tail -150 || tail -150 "$LOG"
+            grep -Ei '(error|failed|fatal|not found|does not exist|unable|timeout)' "$LOG" | tail -150 || tail -150 "$LOG"
             exit 1
           fi
 
           if ! ./scripts/feeds install -a >>"$LOG" 2>&1; then
             echo "::error::Official feeds installation failed"
-            grep -Ei '(error|failed|fatal|not found|does not exist)' "$LOG" | tail -150 || tail -150 "$LOG"
+            grep -Ei '(error|failed|fatal|not found|does not exist|unable)' "$LOG" | tail -150 || tail -150 "$LOG"
             exit 1
           fi
 
-      - name: Add official OpenClash source
+      - name: Patch libffi to avoid host-triplet mismatch (known upstream bug)
         shell: bash
         run: |
           set -euo pipefail
-          LOG="${RUNNER_TEMP}/openclash.log"
+          LOG="${RUNNER_TEMP}/libffi-patch.log"
+          : >"$LOG"
 
-          rm -rf package/openclash
-          mkdir -p package/openclash
+          LIBFFI_MK="$(find feeds/packages/libs/libffi -maxdepth 2 -type f -name Makefile -print -quit 2>/dev/null || true)"
+
+          if [ -z "$LIBFFI_MK" ]; then
+            echo "libffi Makefile not found under feeds/packages/libs/libffi. Skipping patch." | tee -a "$LOG"
+            exit 0
+          fi
+
+          echo "Found libffi Makefile: $LIBFFI_MK" | tee -a "$LOG"
+          cp "$LIBFFI_MK" "$LIBFFI_MK.bak"
+
+          # 1) Remove autoreconf fixup that breaks host triplet detection
+          if grep -qE '^[[:space:]]*PKG_FIXUP[[:space:]]*[:+]?=.*autoreconf' "$LIBFFI_MK"; then
+            sed -i -E 's|^([[:space:]]*)PKG_FIXUP([[:space:]]*[:+]?=.*)autoreconf(.*)$|\1# PKG_FIXUP\2autoreconf\3  # patched: skip autoreconf|' "$LIBFFI_MK"
+            echo "Removed autoreconf fixup" | tee -a "$LOG"
+          else
+            echo "PKG_FIXUP autoreconf line not found. Nothing to strip." | tee -a "$LOG"
+          fi
+
+          # 2) Loosen fficonfig.h glob so any linux triplet directory matches
+          if grep -q 'x86_64-openwrt-linux' "$LIBFFI_MK"; then
+            sed -i 's|x86_64-openwrt-linux\*|*-linux-*|g' "$LIBFFI_MK"
+            echo "Loosened x86_64-openwrt-linux* glob" | tee -a "$LOG"
+          fi
+          if grep -qE '\$\(REAL_GNU_TARGET_NAME\)' "$LIBFFI_MK"; then
+            sed -i 's|\$(REAL_GNU_TARGET_NAME)/fficonfig.h|*-linux-*/fficonfig.h|g' "$LIBFFI_MK"
+            echo "Loosened REAL_GNU_TARGET_NAME glob" | tee -a "$LOG"
+          fi
+
+          echo "===== Patched libffi Makefile diff ====="
+          diff -u "$LIBFFI_MK.bak" "$LIBFFI_MK" || true
+
+      - name: Prepare OpenClash package source (internal feeds first)
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG="${RUNNER_TEMP}/openclash-source.log"
+          : >"$LOG"
+
+          echo "Checking internal feeds for luci-app-openclash..." | tee -a "$LOG"
+
+          INTERNAL_OPENCLASH_PATH="$(find package/feeds package -type d -name 'luci-app-openclash' -print -quit 2>/dev/null || true)"
+
+          if [ -n "$INTERNAL_OPENCLASH_PATH" ]; then
+            echo "Using internal luci-app-openclash: ${INTERNAL_OPENCLASH_PATH}" | tee -a "$LOG"
+            exit 0
+          fi
+
+          echo "Internal luci-app-openclash not found. Falling back to official upstream." | tee -a "$LOG"
+
+          mkdir -p package/external
+          rm -rf package/external/openclash-src package/external/luci-app-openclash
 
           if ! git clone --depth 1 --branch master \
             https://github.com/vernesong/OpenClash.git \
-            package/openclash/OpenClash >"$LOG" 2>&1; then
-            echo "::error::OpenClash source clone failed"
-            grep -Ei '(error|failed|fatal|not found)' "$LOG" | tail -100 || tail -100 "$LOG"
+            package/external/openclash-src >>"$LOG" 2>&1; then
+            echo "::error::OpenClash official source clone failed"
+            grep -Ei '(error|failed|fatal|not found|unable)' "$LOG" | tail -100 || tail -100 "$LOG"
             exit 1
           fi
 
-          OPENCLASH_MAKEFILE="$(find package/openclash -type f -path '*/luci-app-openclash/Makefile' -print -quit)"
-          if [ -z "$OPENCLASH_MAKEFILE" ]; then
-            echo "::error::OpenClash Makefile not found"
+          if [ ! -f package/external/openclash-src/luci-app-openclash/Makefile ]; then
+            echo "::error::OpenClash Makefile not found in official source"
+            find package/external/openclash-src -maxdepth 3 -type f -name Makefile | sort
             exit 1
           fi
+
+          ln -s openclash-src/luci-app-openclash package/external/luci-app-openclash
+
+          if [ ! -f package/external/luci-app-openclash/Makefile ]; then
+            echo "::error::OpenClash symlink Makefile check failed"
+            exit 1
+          fi
+
+          echo "Using external OpenClash official source fallback." | tee -a "$LOG"
 
       - name: Generate build configuration
         shell: bash
@@ -153,130 +214,142 @@ jobs:
           rm -f .config .config.old
 
           cat > .config <<'EOF'
-          CONFIG_CCACHE=y
+CONFIG_CCACHE=y
 
-          CONFIG_TARGET_x86=y
-          CONFIG_TARGET_x86_64=y
-          CONFIG_TARGET_x86_64_DEVICE_generic=y
+CONFIG_TARGET_x86=y
+CONFIG_TARGET_x86_64=y
+CONFIG_TARGET_x86_64_DEVICE_generic=y
 
-          CONFIG_TARGET_IMAGES_GZIP=y
-          CONFIG_TARGET_ROOTFS_EXT4FS=y
-          CONFIG_TARGET_ROOTFS_SQUASHFS=y
+CONFIG_TARGET_IMAGES_GZIP=y
+CONFIG_TARGET_ROOTFS_EXT4FS=y
+CONFIG_TARGET_ROOTFS_SQUASHFS=y
 
-          CONFIG_USE_APK=n
-          CONFIG_PACKAGE_opkg=y
+# Prefer opkg on 24.10
+# CONFIG_USE_APK is not set
+CONFIG_PACKAGE_opkg=y
 
-          CONFIG_PACKAGE_luci=y
-          CONFIG_PACKAGE_luci-base=y
-          CONFIG_PACKAGE_luci-mod-admin-full=y
-          CONFIG_PACKAGE_luci-mod-network=y
-          CONFIG_PACKAGE_luci-mod-status=y
-          CONFIG_PACKAGE_luci-mod-system=y
-          CONFIG_PACKAGE_luci-theme-bootstrap=y
-          CONFIG_PACKAGE_luci-compat=y
-          CONFIG_PACKAGE_luci-lib-ipkg=y
-          CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-          CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
-          CONFIG_PACKAGE_luci-i18n-opkg-zh-cn=y
+# LuCI base
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_luci-base=y
+CONFIG_PACKAGE_luci-mod-admin-full=y
+CONFIG_PACKAGE_luci-mod-network=y
+CONFIG_PACKAGE_luci-mod-status=y
+CONFIG_PACKAGE_luci-mod-system=y
+CONFIG_PACKAGE_luci-theme-bootstrap=y
+CONFIG_PACKAGE_luci-compat=y
+CONFIG_PACKAGE_luci-lib-ipkg=y
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-opkg-zh-cn=y
 
-          CONFIG_PACKAGE_ca-certificates=y
-          CONFIG_PACKAGE_ca-bundle=y
-          CONFIG_PACKAGE_curl=y
-          CONFIG_PACKAGE_wget-ssl=y
-          CONFIG_PACKAGE_openssl-util=y
-          CONFIG_PACKAGE_unzip=y
-          CONFIG_PACKAGE_tar=y
-          CONFIG_PACKAGE_gzip=y
+# Basic userland
+CONFIG_PACKAGE_ca-certificates=y
+CONFIG_PACKAGE_ca-bundle=y
+CONFIG_PACKAGE_curl=y
+CONFIG_PACKAGE_wget-ssl=y
+CONFIG_PACKAGE_openssl-util=y
+CONFIG_PACKAGE_unzip=y
+CONFIG_PACKAGE_tar=y
+CONFIG_PACKAGE_gzip=y
+CONFIG_PACKAGE_bash=y
+CONFIG_PACKAGE_coreutils=y
+CONFIG_PACKAGE_coreutils-nohup=y
+CONFIG_PACKAGE_jsonfilter=y
+CONFIG_PACKAGE_resolveip=y
+CONFIG_PACKAGE_ip-full=y
 
-          CONFIG_PACKAGE_kmod-ath=y
-          CONFIG_PACKAGE_kmod-ath9k=y
-          CONFIG_PACKAGE_ath9k-common=y
-          CONFIG_PACKAGE_wireless-regdb=y
-          CONFIG_PACKAGE_iw=y
-          CONFIG_PACKAGE_iwinfo=y
-          CONFIG_PACKAGE_hostapd=y
-          CONFIG_PACKAGE_wpa-supplicant=y
-          CONFIG_PACKAGE_wpad-basic-mbedtls=n
+# AR9285 / ath9k wireless
+CONFIG_PACKAGE_kmod-ath=y
+CONFIG_PACKAGE_kmod-ath9k=y
+CONFIG_PACKAGE_ath9k-common=y
+CONFIG_PACKAGE_wireless-regdb=y
+CONFIG_PACKAGE_iw=y
+CONFIG_PACKAGE_iwinfo=y
+CONFIG_PACKAGE_hostapd=y
+CONFIG_PACKAGE_wpa-supplicant=y
+# CONFIG_PACKAGE_wpad-basic-mbedtls is not set
 
-          CONFIG_PACKAGE_ppp=y
-          CONFIG_PACKAGE_ppp-mod-pppol2tp=y
-          CONFIG_PACKAGE_xl2tpd=y
-          CONFIG_PACKAGE_kmod-l2tp=y
-          CONFIG_PACKAGE_kmod-pppol2tp=y
-          CONFIG_PACKAGE_luci-proto-ppp=y
+# L2TP / PPPoL2TP
+CONFIG_PACKAGE_ppp=y
+CONFIG_PACKAGE_ppp-mod-pppol2tp=y
+CONFIG_PACKAGE_xl2tpd=y
+CONFIG_PACKAGE_kmod-l2tp=y
+CONFIG_PACKAGE_kmod-pppol2tp=y
+CONFIG_PACKAGE_luci-proto-ppp=y
 
-          CONFIG_PACKAGE_strongswan=y
-          CONFIG_PACKAGE_strongswan-charon=y
-          CONFIG_PACKAGE_strongswan-ipsec=y
-          CONFIG_PACKAGE_strongswan-mod-aes=y
-          CONFIG_PACKAGE_strongswan-mod-gcm=y
-          CONFIG_PACKAGE_strongswan-mod-hmac=y
-          CONFIG_PACKAGE_strongswan-mod-kernel-netlink=y
-          CONFIG_PACKAGE_strongswan-mod-nonce=y
-          CONFIG_PACKAGE_strongswan-mod-pem=y
-          CONFIG_PACKAGE_strongswan-mod-pkcs1=y
-          CONFIG_PACKAGE_strongswan-mod-pkcs8=y
-          CONFIG_PACKAGE_strongswan-mod-pubkey=y
-          CONFIG_PACKAGE_strongswan-mod-random=y
-          CONFIG_PACKAGE_strongswan-mod-sha1=y
-          CONFIG_PACKAGE_strongswan-mod-sha2=y
-          CONFIG_PACKAGE_strongswan-mod-socket-default=y
-          CONFIG_PACKAGE_strongswan-mod-stroke=y
-          CONFIG_PACKAGE_strongswan-mod-updown=y
-          CONFIG_PACKAGE_strongswan-mod-x509=y
-          CONFIG_PACKAGE_strongswan-mod-xauth-generic=y
-          CONFIG_PACKAGE_strongswan-mod-gmp=y
+# IPSec / StrongSwan
+CONFIG_PACKAGE_strongswan=y
+CONFIG_PACKAGE_strongswan-charon=y
+CONFIG_PACKAGE_strongswan-ipsec=y
+CONFIG_PACKAGE_strongswan-mod-aes=y
+CONFIG_PACKAGE_strongswan-mod-gcm=y
+CONFIG_PACKAGE_strongswan-mod-gmp=y
+CONFIG_PACKAGE_strongswan-mod-hmac=y
+CONFIG_PACKAGE_strongswan-mod-kernel-netlink=y
+CONFIG_PACKAGE_strongswan-mod-nonce=y
+CONFIG_PACKAGE_strongswan-mod-pem=y
+CONFIG_PACKAGE_strongswan-mod-pkcs1=y
+CONFIG_PACKAGE_strongswan-mod-pkcs8=y
+CONFIG_PACKAGE_strongswan-mod-pubkey=y
+CONFIG_PACKAGE_strongswan-mod-random=y
+CONFIG_PACKAGE_strongswan-mod-sha1=y
+CONFIG_PACKAGE_strongswan-mod-sha2=y
+CONFIG_PACKAGE_strongswan-mod-socket-default=y
+CONFIG_PACKAGE_strongswan-mod-stroke=y
+CONFIG_PACKAGE_strongswan-mod-updown=y
+CONFIG_PACKAGE_strongswan-mod-x509=y
+CONFIG_PACKAGE_strongswan-mod-xauth-generic=y
 
-          CONFIG_PACKAGE_luci-app-openclash=y
-          CONFIG_PACKAGE_dnsmasq=n
-          CONFIG_PACKAGE_dnsmasq-full=y
-          CONFIG_PACKAGE_bash=y
-          CONFIG_PACKAGE_coreutils-nohup=y
-          CONFIG_PACKAGE_curl=y
-          CONFIG_PACKAGE_ca-bundle=y
-          CONFIG_PACKAGE_ip-full=y
-          CONFIG_PACKAGE_unzip=y
-          CONFIG_PACKAGE_ruby=y
-          CONFIG_PACKAGE_ruby-yaml=y
-          CONFIG_PACKAGE_kmod-tun=y
-          CONFIG_PACKAGE_kmod-inet-diag=y
-          CONFIG_PACKAGE_kmod-nft-tproxy=y
+# OpenClash
+CONFIG_PACKAGE_luci-app-openclash=y
+# CONFIG_PACKAGE_dnsmasq is not set
+CONFIG_PACKAGE_dnsmasq-full=y
+CONFIG_PACKAGE_kmod-tun=y
+CONFIG_PACKAGE_kmod-inet-diag=y
+CONFIG_PACKAGE_kmod-nft-tproxy=y
+CONFIG_PACKAGE_kmod-nft-socket=y
+CONFIG_PACKAGE_kmod-nft-nat=y
+CONFIG_PACKAGE_iptables-nft=y
+CONFIG_PACKAGE_ipset=y
+CONFIG_PACKAGE_ruby=y
+CONFIG_PACKAGE_ruby-yaml=y
 
-          CONFIG_PACKAGE_resolveip=y
-          CONFIG_PACKAGE_ethtool=y
-          CONFIG_PACKAGE_iperf3=y
-          CONFIG_PACKAGE_tcpdump=y
+# Diagnostics
+CONFIG_PACKAGE_ethtool=y
+CONFIG_PACKAGE_iperf3=y
+CONFIG_PACKAGE_tcpdump=y
+CONFIG_PACKAGE_htop=y
+CONFIG_PACKAGE_lsof=y
+CONFIG_PACKAGE_tree=y
+CONFIG_PACKAGE_nano=y
+CONFIG_PACKAGE_openssh-sftp-server=y
 
-          CONFIG_PACKAGE_block-mount=y
-          CONFIG_PACKAGE_fdisk=y
-          CONFIG_PACKAGE_lsblk=y
-          CONFIG_PACKAGE_parted=y
-          CONFIG_PACKAGE_resize2fs=y
-          CONFIG_PACKAGE_e2fsprogs=y
-          CONFIG_PACKAGE_kmod-fs-ext4=y
-          CONFIG_PACKAGE_kmod-fs-vfat=y
-          CONFIG_PACKAGE_kmod-fs-exfat=y
-          CONFIG_PACKAGE_kmod-fs-ntfs3=y
-          CONFIG_PACKAGE_kmod-usb-storage=y
-          CONFIG_PACKAGE_kmod-usb-storage-uas=y
+# USB storage / filesystems
+CONFIG_PACKAGE_block-mount=y
+CONFIG_PACKAGE_fdisk=y
+CONFIG_PACKAGE_lsblk=y
+CONFIG_PACKAGE_parted=y
+CONFIG_PACKAGE_resize2fs=y
+CONFIG_PACKAGE_e2fsprogs=y
+CONFIG_PACKAGE_kmod-fs-ext4=y
+CONFIG_PACKAGE_kmod-fs-vfat=y
+CONFIG_PACKAGE_kmod-fs-exfat=y
+CONFIG_PACKAGE_kmod-fs-ntfs3=y
+CONFIG_PACKAGE_kmod-usb-storage=y
+CONFIG_PACKAGE_kmod-usb-storage-uas=y
 
-          CONFIG_PACKAGE_kmod-e1000=y
-          CONFIG_PACKAGE_kmod-e1000e=y
-          CONFIG_PACKAGE_kmod-igb=y
-          CONFIG_PACKAGE_kmod-igc=y
-          CONFIG_PACKAGE_kmod-r8169=y
-          CONFIG_PACKAGE_kmod-tg3=y
-
-          CONFIG_PACKAGE_openssh-sftp-server=y
-          CONFIG_PACKAGE_nano=y
-          CONFIG_PACKAGE_htop=y
-          CONFIG_PACKAGE_lsof=y
-          CONFIG_PACKAGE_tree=y
-          EOF
+# x86 common NIC drivers
+CONFIG_PACKAGE_kmod-e1000=y
+CONFIG_PACKAGE_kmod-e1000e=y
+CONFIG_PACKAGE_kmod-igb=y
+CONFIG_PACKAGE_kmod-igc=y
+CONFIG_PACKAGE_kmod-r8169=y
+CONFIG_PACKAGE_kmod-tg3=y
+EOF
 
           if ! make defconfig >"$LOG" 2>&1; then
             echo "::error::make defconfig failed"
-            grep -Ei '(error|failed|fatal|not found|does not exist|warning:.*dependency)' "$LOG" | tail -150 || tail -150 "$LOG"
+            grep -Ei '(error|failed|fatal|not found|does not exist|warning:.*dependency|symbol)' "$LOG" | tail -200 || tail -200 "$LOG"
             exit 1
           fi
 
@@ -290,6 +363,9 @@ jobs:
           CONFIG_TARGET_x86_64
           CONFIG_TARGET_x86_64_DEVICE_generic
           CONFIG_PACKAGE_luci
+          CONFIG_PACKAGE_luci-base
+          CONFIG_PACKAGE_luci-compat
+          CONFIG_PACKAGE_luci-lib-ipkg
           CONFIG_PACKAGE_kmod-ath9k
           CONFIG_PACKAGE_hostapd
           CONFIG_PACKAGE_wpa-supplicant
@@ -332,6 +408,11 @@ jobs:
             exit 1
           fi
 
+          if grep -q '^CONFIG_PACKAGE_wpad-basic-mbedtls=y$' .config; then
+            echo "::error::wpad-basic-mbedtls conflicts with hostapd + wpa-supplicant selection"
+            exit 1
+          fi
+
           if [ -n "$MISSING" ]; then
             echo "::error::Required configuration missing:${MISSING}"
             for symbol in $MISSING; do
@@ -339,6 +420,8 @@ jobs:
             done
             exit 1
           fi
+
+          echo "Configuration validation passed."
 
       - name: Download package sources
         shell: bash
@@ -350,6 +433,7 @@ jobs:
           DOWNLOAD_OK=false
 
           for attempt in 1 2 3; do
+            echo "Download attempt ${attempt}" >>"$LOG"
             if make download -j"$(nproc)" V=s >>"$LOG" 2>&1; then
               DOWNLOAD_OK=true
               break
@@ -359,7 +443,7 @@ jobs:
 
           if [ "$DOWNLOAD_OK" != "true" ]; then
             echo "::error::make download failed after 3 attempts"
-            grep -Ei '(error|failed|fatal|not found|404|hash mismatch|download failed)' "$LOG" | tail -200 || tail -200 "$LOG"
+            grep -Ei '(error|failed|fatal|not found|404|hash mismatch|download failed|unable|timeout)' "$LOG" | tail -250 || tail -250 "$LOG"
             exit 1
           fi
 
@@ -430,6 +514,7 @@ jobs:
             echo "Commit: $(git rev-parse HEAD)"
             echo "Build date: ${BUILD_DATE}"
             echo "GitHub run ID: ${GITHUB_RUN_ID}"
+            echo "OpenClash source policy: internal feeds first, official upstream fallback only when missing"
           } > "$ARTIFACT_DIR/build-information.txt"
 
           if ! find "$ARTIFACT_DIR" -maxdepth 1 -type f -name '*.img.gz' -print -quit | grep -q .; then
@@ -465,6 +550,7 @@ jobs:
             - 源码版本：${{ env.SHORT_COMMIT }}
             - 目标设备：x86-64 generic
             - 包管理器：opkg
+            - OpenClash 来源：优先内部 feeds，缺失时回退到 vernesong/OpenClash 官方仓库
 
             ### 内置功能
 
@@ -475,6 +561,7 @@ jobs:
             - OpenClash
             - dnsmasq-full
             - 中文 LuCI
+            - USB 存储与常见 x86 网卡驱动
 
             Mihomo 内核由 OpenClash 在安装后下载和管理。
 
@@ -487,7 +574,6 @@ jobs:
             build-parallel.log
             build-single.log
             .config
-            logs/
           if-no-files-found: ignore
           retention-days: 7
 
