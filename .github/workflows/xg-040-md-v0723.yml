@@ -1,0 +1,485 @@
+name: Build XG-040G-MD Docker ZT OpenClash NPU
+
+"on":
+  workflow_dispatch:
+    inputs:
+      upload_release:
+        description: "上传固件到 GitHub Release"
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    - cron: "37 0 * * 0"
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: xg-040g-md-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TZ: Asia/Shanghai
+  REPO_BRANCH: master
+  TARGET: airoha
+  SUBTARGET: an7581
+  DEVICE: nokia_xg-040g-md-ubi
+  RELEASE_TAG: XG-040G-MD
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout ImmortalWrt
+        uses: actions/checkout@v4
+        with:
+          repository: immortalwrt/immortalwrt
+          ref: ${{ env.REPO_BRANCH }}
+          fetch-depth: 1
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo apt-get clean
+          sudo docker system prune --all --force --volumes || true
+          df -h
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            ack antlr3 asciidoc autoconf automake autopoint binutils bison \
+            build-essential bzip2 ccache clang cmake cpio curl \
+            device-tree-compiler ecj fastjar flex gawk gettext gcc-multilib \
+            g++-multilib git gnutls-dev gperf haveged help2man intltool \
+            lib32gcc-s1 libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev \
+            libltdl-dev libmpc-dev libmpfr-dev libncurses-dev libpython3-dev \
+            libreadline-dev libssl-dev libtool libyaml-dev libz-dev lld llvm \
+            lrzsz make mkisofs msmtp nano ninja-build p7zip p7zip-full patch \
+            pkgconf python3 python3-docutils python3-pip python3-ply \
+            python3-pyelftools qemu-utils re2c rsync scons squashfs-tools \
+            subversion swig texinfo uglifyjs unzip vim wget xmlto xxd \
+            zlib1g-dev zstd
+          ccache --max-size=5G
+          ccache --zero-stats
+
+      - name: Restore build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            dl
+            ${{ env.CCACHE_DIR }}
+          key: xg040g-${{ env.REPO_BRANCH }}-${{ github.sha }}
+          restore-keys: |
+            xg040g-${{ env.REPO_BRANCH }}-
+            xg040g-
+
+      - name: Update official feeds
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo ">>> Original feeds.conf.default"
+          cat feeds.conf.default
+
+          # 确保仅使用源码自带官方 feeds
+          sed -i '/kenzok8\/openwrt-packages/d' feeds.conf.default
+          sed -i '/kenzok8\/small/d' feeds.conf.default
+          sed -i '/vernesong\/OpenClash/d' feeds.conf.default
+
+          echo ">>> Official feeds only"
+          cat feeds.conf.default
+
+          FEEDS_OK=false
+          for attempt in 1 2 3; do
+            if ./scripts/feeds update -a; then
+              FEEDS_OK=true
+              break
+            fi
+            echo ">>> feeds update attempt ${attempt} failed"
+            sleep 30
+          done
+
+          if [ "$FEEDS_OK" != "true" ]; then
+            echo "!!! Official feeds update failed after 3 attempts"
+            exit 1
+          fi
+
+          ./scripts/feeds install -a
+
+          # giflib 必须来自官方 packages feed
+          test -f feeds/packages/libs/giflib/Makefile
+          ./scripts/feeds install -p packages -f giflib
+          test -e package/feeds/packages/giflib
+
+          echo ">>> Official giflib source"
+          readlink -f package/feeds/packages/giflib
+          grep -E '^(PKG_NAME|PKG_VERSION|PKG_RELEASE):=' \
+            feeds/packages/libs/giflib/Makefile || true
+
+      - name: Generate build configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .config .config.old
+
+          cat > .config <<'EOF'
+          CONFIG_CCACHE=y
+
+          # Target: Nokia XG-040G-MD UBI
+          CONFIG_TARGET_airoha=y
+          CONFIG_TARGET_airoha_an7581=y
+          CONFIG_TARGET_airoha_an7581_DEVICE_nokia_xg-040g-md-ubi=y
+
+          # LuCI
+          CONFIG_PACKAGE_luci=y
+          CONFIG_PACKAGE_luci-base=y
+          CONFIG_PACKAGE_luci-mod-admin-full=y
+          CONFIG_PACKAGE_luci-mod-network=y
+          CONFIG_PACKAGE_luci-mod-status=y
+          CONFIG_PACKAGE_luci-mod-system=y
+          CONFIG_PACKAGE_luci-compat=y
+          CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
+
+          # Argon
+          CONFIG_PACKAGE_luci-theme-argon=y
+          CONFIG_PACKAGE_luci-app-argon-config=y
+
+          # Official giflib
+          CONFIG_PACKAGE_giflib=y
+
+          # ZeroTier
+          CONFIG_PACKAGE_zerotier=y
+          CONFIG_PACKAGE_luci-app-zerotier=y
+
+          # Docker and Dockerman
+          CONFIG_PACKAGE_docker=y
+          CONFIG_PACKAGE_dockerd=y
+          CONFIG_PACKAGE_luci-app-dockerman=y
+          CONFIG_PACKAGE_kmod-veth=y
+
+          # OpenClash
+          CONFIG_PACKAGE_luci-app-openclash=y
+          CONFIG_PACKAGE_dnsmasq=n
+          CONFIG_PACKAGE_dnsmasq-full=y
+          CONFIG_PACKAGE_bash=y
+          CONFIG_PACKAGE_ca-bundle=y
+          CONFIG_PACKAGE_curl=y
+          CONFIG_PACKAGE_ip-full=y
+          CONFIG_PACKAGE_ruby=y
+          CONFIG_PACKAGE_ruby-yaml=y
+          CONFIG_PACKAGE_unzip=y
+          CONFIG_PACKAGE_kmod-tun=y
+          CONFIG_PACKAGE_kmod-inet-diag=y
+          CONFIG_PACKAGE_kmod-nft-tproxy=y
+
+          # Native Airoha acceleration
+
+          # USB storage
+          CONFIG_PACKAGE_block-mount=y
+          CONFIG_PACKAGE_blockd=y
+          CONFIG_PACKAGE_fdisk=y
+          CONFIG_PACKAGE_lsblk=y
+          CONFIG_PACKAGE_e2fsprogs=y
+          CONFIG_PACKAGE_resize2fs=y
+          CONFIG_PACKAGE_kmod-usb-storage=y
+          CONFIG_PACKAGE_kmod-usb-storage-uas=y
+          CONFIG_PACKAGE_kmod-fs-ext4=y
+          CONFIG_PACKAGE_kmod-fs-vfat=y
+          CONFIG_PACKAGE_kmod-fs-exfat=y
+          CONFIG_PACKAGE_kmod-fs-ntfs3=y
+          CONFIG_PACKAGE_kmod-nls-cp437=y
+          CONFIG_PACKAGE_kmod-nls-iso8859-1=y
+          CONFIG_PACKAGE_kmod-nls-utf8=y
+
+          # USB network and serial
+          CONFIG_PACKAGE_kmod-usb-net=y
+          CONFIG_PACKAGE_kmod-usb-net-rndis=y
+          CONFIG_PACKAGE_kmod-usb-serial=y
+          CONFIG_PACKAGE_kmod-usb-serial-ftdi=y
+          CONFIG_PACKAGE_kmod-usb-serial-pl2303=y
+
+          # Utilities
+          CONFIG_PACKAGE_luci-app-ttyd=y
+          CONFIG_PACKAGE_luci-app-commands=y
+          CONFIG_PACKAGE_openssh-sftp-server=y
+          CONFIG_PACKAGE_wget-ssl=y
+          CONFIG_PACKAGE_nano=y
+          CONFIG_PACKAGE_htop=y
+          CONFIG_PACKAGE_iperf3=y
+          CONFIG_PACKAGE_resolveip=y
+          CONFIG_PACKAGE_ethtool=y
+
+          # Follow ImmortalWrt master package-manager defaults.
+          # Do not force opkg and do not disable APK.
+          EOF
+
+          make defconfig
+
+      - name: Validate configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          grep -q '^CONFIG_TARGET_airoha=y$' .config
+          grep -q '^CONFIG_TARGET_airoha_an7581=y$' .config
+          grep -q '^CONFIG_TARGET_airoha_an7581_DEVICE_nokia_xg-040g-md-ubi=y$' .config
+
+          REQUIRED_PACKAGES="
+          luci
+          giflib
+          docker
+          dockerd
+          luci-app-dockerman
+          zerotier
+          luci-app-zerotier
+          luci-app-openclash
+          dnsmasq-full
+          luci-theme-argon
+          luci-app-argon-config
+          kmod-veth
+          kmod-usb-storage
+          kmod-usb-storage-uas
+          kmod-fs-ext4
+          kmod-tun
+          "
+
+          MISSING=""
+          for package_name in $REQUIRED_PACKAGES; do
+            if grep -q "^CONFIG_PACKAGE_${package_name}=y$" .config; then
+              echo "OK: ${package_name}"
+            else
+              echo "MISSING: ${package_name}"
+              MISSING="${MISSING} ${package_name}"
+            fi
+          done
+
+          if grep -q '^CONFIG_PACKAGE_dnsmasq=y$' .config; then
+            echo "!!! dnsmasq conflicts with dnsmasq-full"
+            exit 1
+          fi
+
+          if [ -n "$MISSING" ]; then
+            echo "!!! Missing required packages:${MISSING}"
+            exit 1
+          fi
+
+          echo ">>> Package manager selected by master"
+          grep -E '^(CONFIG_USE_APK|CONFIG_PACKAGE_apk|CONFIG_PACKAGE_opkg)=' \
+            .config || true
+
+      - name: Download sources
+        shell: bash
+        timeout-minutes: 120
+        run: |
+          set -euo pipefail
+          DOWNLOAD_OK=false
+
+          for attempt in 1 2 3; do
+            if make download -j"$(nproc)" V=s; then
+              DOWNLOAD_OK=true
+              break
+            fi
+            echo ">>> download attempt ${attempt} failed"
+            sleep 30
+          done
+
+          if [ "$DOWNLOAD_OK" != "true" ]; then
+            echo "!!! make download failed after 3 attempts"
+            exit 1
+          fi
+
+          find dl -type f -size -1024c -print -delete || true
+
+      - name: Precompile official giflib
+        shell: bash
+        timeout-minutes: 30
+        run: |
+          set -euo pipefail
+          make package/feeds/packages/giflib/clean V=sc
+          make package/feeds/packages/giflib/compile -j1 V=sc
+
+          find staging_dir build_dir \
+            -type f \
+            -name 'libgif.so*' \
+            -print || true
+
+          if ! find staging_dir \
+            -type f \
+            -name 'libgif.so*' \
+            -print \
+            -quit | grep -q .; then
+            echo "!!! giflib compiled but libgif.so was not staged"
+            exit 1
+          fi
+
+      - name: Compile firmware
+        shell: bash
+        timeout-minutes: 360
+        run: |
+          set -o pipefail
+
+          if make -j"$(nproc)" V=s 2>&1 | tee build-parallel.log; then
+            echo ">>> Parallel build completed"
+          else
+            echo ">>> Parallel build failed, retrying serially"
+            make -j1 V=sc 2>&1 | tee build-single.log
+          fi
+
+          ccache --show-stats
+
+      - name: Set build metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "BUILD_DATE=$(date +'%Y-%m-%d')" >> "$GITHUB_ENV"
+          echo "BUILD_TIME=$(date +'%Y-%m-%d_%H-%M-%S')" >> "$GITHUB_ENV"
+          echo "SHORT_COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          echo "FULL_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Prepare firmware artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ARTIFACT_DIR="${GITHUB_WORKSPACE}/artifact"
+          TARGET_DIR="bin/targets/${TARGET}/${SUBTARGET}"
+
+          rm -rf "$ARTIFACT_DIR"
+          mkdir -p "$ARTIFACT_DIR"
+
+          if [ ! -d "$TARGET_DIR" ]; then
+            echo "!!! Missing target output directory: $TARGET_DIR"
+            find bin/targets -maxdepth 3 -type d -print || true
+            exit 1
+          fi
+
+          find "$TARGET_DIR" \
+            -maxdepth 1 \
+            -type f \
+            \( \
+              -name '*.itb' \
+              -o -name '*.bin' \
+              -o -name '*.ubi' \
+              -o -name '*.ubifs' \
+              -o -name '*.tar.gz' \
+              -o -name '*.fip' \
+              -o -name '*.manifest' \
+              -o -name '*.buildinfo' \
+              -o -name '*.json' \
+              -o -name 'sha256sums' \
+            \) \
+            -exec cp -v {} "$ARTIFACT_DIR/" \;
+
+          cp .config "$ARTIFACT_DIR/config.buildinfo"
+          git log -1 --format=fuller > "$ARTIFACT_DIR/source-version.txt"
+
+          {
+            echo "Repository: https://github.com/immortalwrt/immortalwrt"
+            echo "Branch: ${REPO_BRANCH}"
+            echo "Target: ${TARGET}/${SUBTARGET}"
+            echo "Device: ${DEVICE}"
+            echo "Commit: ${FULL_COMMIT}"
+            echo "Build date: ${BUILD_DATE}"
+            echo "GitHub run ID: ${GITHUB_RUN_ID}"
+          } > "$ARTIFACT_DIR/build-information.txt"
+
+          if [ -z "$(find "$ARTIFACT_DIR" -maxdepth 1 -type f -print -quit)" ]; then
+            echo "!!! No artifacts found"
+            exit 1
+          fi
+
+          ls -lah "$ARTIFACT_DIR"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ImmortalWrt-XG-040G-MD-${{ env.BUILD_TIME }}-${{ env.SHORT_COMMIT }}
+          path: ${{ github.workspace }}/artifact/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Upload firmware to GitHub Release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_release == true }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ImmortalWrt XG-040G-MD Latest Build
+          prerelease: false
+          draft: false
+          make_latest: true
+          files: |
+            ${{ github.workspace }}/artifact/*
+          body: |
+            ## ImmortalWrt XG-040G-MD 自动编译固件
+
+            - 编译日期：${{ env.BUILD_DATE }}
+            - 源码分支：${{ env.REPO_BRANCH }}
+            - 源码版本：${{ env.SHORT_COMMIT }}
+            - 目标平台：Airoha AN7581
+            - 目标设备：Nokia XG-040G-MD UBI
+
+            ### 内置功能
+
+            - Docker 与 Dockerman
+            - ZeroTier
+            - OpenClash
+            - Argon 主题
+            - Airoha 设备官方驱动与 UBI 设备配置
+            - USB 存储与 UAS
+            - ext4、exFAT、VFAT 和 NTFS3
+            - 中文 LuCI
+            - ttyd 和 OpenSSH SFTP
+
+            ### Docker 存储
+
+            刷机后建议将 USB 存储格式化为 ext4，通过 UUID 配置开机自动挂载，
+            再将 Docker Root Dir 修改为 `/mnt/sda1/docker`。
+
+            ### 已取消
+
+            - iStore
+            - kenzo feed
+            - small feed
+            - TurboACC
+            - Shortcut-FE
+            - docker-compose
+
+            刷机前请完整备份原厂分区，并准备 USB-TTL 救砖环境。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: XG-040G-MD-build-logs-${{ github.run_id }}
+          path: |
+            build-parallel.log
+            build-single.log
+            .config
+            feeds.conf.default
+            logs/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: |
+          rm -rf staging_dir build_dir tmp
+          df -h
+          ccache --show-stats || true
