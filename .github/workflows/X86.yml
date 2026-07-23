@@ -214,138 +214,147 @@ jobs:
           rm -f .config .config.old
 
           cat > .config <<'EOF'
-CONFIG_CCACHE=y
+          CONFIG_CCACHE=y
 
-CONFIG_TARGET_x86=y
-CONFIG_TARGET_x86_64=y
-CONFIG_TARGET_x86_64_DEVICE_generic=y
+          CONFIG_TARGET_x86=y
+          CONFIG_TARGET_x86_64=y
+          CONFIG_TARGET_x86_64_DEVICE_generic=y
 
-CONFIG_TARGET_IMAGES_GZIP=y
-CONFIG_TARGET_ROOTFS_EXT4FS=y
-CONFIG_TARGET_ROOTFS_SQUASHFS=y
+          CONFIG_TARGET_IMAGES_GZIP=y
+          CONFIG_TARGET_ROOTFS_EXT4FS=y
+          CONFIG_TARGET_ROOTFS_SQUASHFS=y
 
-# Prefer opkg on 24.10
-# CONFIG_USE_APK is not set
-CONFIG_PACKAGE_opkg=y
+          # Prefer opkg on 24.10
+          # CONFIG_USE_APK is not set
+          CONFIG_PACKAGE_opkg=y
 
-# LuCI base
-CONFIG_PACKAGE_luci=y
-CONFIG_PACKAGE_luci-base=y
-CONFIG_PACKAGE_luci-mod-admin-full=y
-CONFIG_PACKAGE_luci-mod-network=y
-CONFIG_PACKAGE_luci-mod-status=y
-CONFIG_PACKAGE_luci-mod-system=y
-CONFIG_PACKAGE_luci-theme-bootstrap=y
-CONFIG_PACKAGE_luci-compat=y
-CONFIG_PACKAGE_luci-lib-ipkg=y
-CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
-CONFIG_PACKAGE_luci-i18n-opkg-zh-cn=y
+          # LuCI base
+          CONFIG_PACKAGE_luci=y
+          CONFIG_PACKAGE_luci-base=y
+          CONFIG_PACKAGE_luci-mod-admin-full=y
+          CONFIG_PACKAGE_luci-mod-network=y
+          CONFIG_PACKAGE_luci-mod-status=y
+          CONFIG_PACKAGE_luci-mod-system=y
+          CONFIG_PACKAGE_luci-theme-bootstrap=y
+          CONFIG_PACKAGE_luci-compat=y
+          CONFIG_PACKAGE_luci-lib-ipkg=y
+          CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-opkg-zh-cn=y
 
-# Basic userland
-CONFIG_PACKAGE_ca-certificates=y
-CONFIG_PACKAGE_ca-bundle=y
-CONFIG_PACKAGE_curl=y
-CONFIG_PACKAGE_wget-ssl=y
-CONFIG_PACKAGE_openssl-util=y
-CONFIG_PACKAGE_unzip=y
-CONFIG_PACKAGE_tar=y
-CONFIG_PACKAGE_gzip=y
-CONFIG_PACKAGE_bash=y
-CONFIG_PACKAGE_coreutils=y
-CONFIG_PACKAGE_coreutils-nohup=y
-CONFIG_PACKAGE_jsonfilter=y
-CONFIG_PACKAGE_resolveip=y
-CONFIG_PACKAGE_ip-full=y
+          # Basic userland
+          CONFIG_PACKAGE_ca-certificates=y
+          CONFIG_PACKAGE_ca-bundle=y
+          CONFIG_PACKAGE_curl=y
+          CONFIG_PACKAGE_wget-ssl=y
+          CONFIG_PACKAGE_openssl-util=y
+          CONFIG_PACKAGE_unzip=y
+          CONFIG_PACKAGE_tar=y
+          CONFIG_PACKAGE_gzip=y
+          CONFIG_PACKAGE_bash=y
+          CONFIG_PACKAGE_coreutils=y
+          CONFIG_PACKAGE_coreutils-nohup=y
+          CONFIG_PACKAGE_jsonfilter=y
+          CONFIG_PACKAGE_resolveip=y
+          CONFIG_PACKAGE_ip-full=y
 
-# AR9285 / ath9k wireless
-CONFIG_PACKAGE_kmod-ath=y
-CONFIG_PACKAGE_kmod-ath9k=y
-CONFIG_PACKAGE_ath9k-common=y
-CONFIG_PACKAGE_wireless-regdb=y
-CONFIG_PACKAGE_iw=y
-CONFIG_PACKAGE_iwinfo=y
-CONFIG_PACKAGE_hostapd=y
-CONFIG_PACKAGE_wpa-supplicant=y
-# CONFIG_PACKAGE_wpad-basic-mbedtls is not set
+          # AR9285 / ath9k wireless
+          CONFIG_PACKAGE_kmod-ath=y
+          CONFIG_PACKAGE_kmod-ath9k=y
+          CONFIG_PACKAGE_ath9k-common=y
+          CONFIG_PACKAGE_wireless-regdb=y
+          CONFIG_PACKAGE_iw=y
+          CONFIG_PACKAGE_iwinfo=y
+          CONFIG_PACKAGE_hostapd=y
+          CONFIG_PACKAGE_wpa-supplicant=y
+          # CONFIG_PACKAGE_wpad-basic-mbedtls is not set
 
-# L2TP / PPPoL2TP
-CONFIG_PACKAGE_ppp=y
-CONFIG_PACKAGE_ppp-mod-pppol2tp=y
-CONFIG_PACKAGE_xl2tpd=y
-CONFIG_PACKAGE_kmod-l2tp=y
-CONFIG_PACKAGE_kmod-pppol2tp=y
-CONFIG_PACKAGE_luci-proto-ppp=y
+          # L2TP / PPPoL2TP
+          CONFIG_PACKAGE_ppp=y
+          CONFIG_PACKAGE_ppp-mod-pppol2tp=y
+          CONFIG_PACKAGE_xl2tpd=y
+          CONFIG_PACKAGE_kmod-l2tp=y
+          CONFIG_PACKAGE_kmod-pppol2tp=y
+          CONFIG_PACKAGE_luci-proto-ppp=y
 
-# IPSec / StrongSwan
-CONFIG_PACKAGE_strongswan=y
-CONFIG_PACKAGE_strongswan-charon=y
-CONFIG_PACKAGE_strongswan-ipsec=y
-CONFIG_PACKAGE_strongswan-mod-aes=y
-CONFIG_PACKAGE_strongswan-mod-gcm=y
-CONFIG_PACKAGE_strongswan-mod-gmp=y
-CONFIG_PACKAGE_strongswan-mod-hmac=y
-CONFIG_PACKAGE_strongswan-mod-kernel-netlink=y
-CONFIG_PACKAGE_strongswan-mod-nonce=y
-CONFIG_PACKAGE_strongswan-mod-pem=y
-CONFIG_PACKAGE_strongswan-mod-pkcs1=y
-CONFIG_PACKAGE_strongswan-mod-pkcs8=y
-CONFIG_PACKAGE_strongswan-mod-pubkey=y
-CONFIG_PACKAGE_strongswan-mod-random=y
-CONFIG_PACKAGE_strongswan-mod-sha1=y
-CONFIG_PACKAGE_strongswan-mod-sha2=y
-CONFIG_PACKAGE_strongswan-mod-socket-default=y
-CONFIG_PACKAGE_strongswan-mod-stroke=y
-CONFIG_PACKAGE_strongswan-mod-updown=y
-CONFIG_PACKAGE_strongswan-mod-x509=y
-CONFIG_PACKAGE_strongswan-mod-xauth-generic=y
+          # IPSec / StrongSwan
+          CONFIG_PACKAGE_strongswan=y
+          CONFIG_PACKAGE_strongswan-charon=y
+          CONFIG_PACKAGE_strongswan-ipsec=y
+          CONFIG_PACKAGE_strongswan-mod-aes=y
+          CONFIG_PACKAGE_strongswan-mod-gcm=y
+          CONFIG_PACKAGE_strongswan-mod-gmp=y
+          CONFIG_PACKAGE_strongswan-mod-hmac=y
+          CONFIG_PACKAGE_strongswan-mod-kernel-netlink=y
+          CONFIG_PACKAGE_strongswan-mod-nonce=y
+          CONFIG_PACKAGE_strongswan-mod-pem=y
+          CONFIG_PACKAGE_strongswan-mod-pkcs1=y
+          CONFIG_PACKAGE_strongswan-mod-pkcs8=y
+          CONFIG_PACKAGE_strongswan-mod-pubkey=y
+          CONFIG_PACKAGE_strongswan-mod-random=y
+          CONFIG_PACKAGE_strongswan-mod-sha1=y
+          CONFIG_PACKAGE_strongswan-mod-sha2=y
+          CONFIG_PACKAGE_strongswan-mod-socket-default=y
+          CONFIG_PACKAGE_strongswan-mod-stroke=y
+          CONFIG_PACKAGE_strongswan-mod-updown=y
+          CONFIG_PACKAGE_strongswan-mod-x509=y
+          CONFIG_PACKAGE_strongswan-mod-xauth-generic=y
 
-# OpenClash
-CONFIG_PACKAGE_luci-app-openclash=y
-# CONFIG_PACKAGE_dnsmasq is not set
-CONFIG_PACKAGE_dnsmasq-full=y
-CONFIG_PACKAGE_kmod-tun=y
-CONFIG_PACKAGE_kmod-inet-diag=y
-CONFIG_PACKAGE_kmod-nft-tproxy=y
-CONFIG_PACKAGE_kmod-nft-socket=y
-CONFIG_PACKAGE_kmod-nft-nat=y
-CONFIG_PACKAGE_iptables-nft=y
-CONFIG_PACKAGE_ipset=y
-CONFIG_PACKAGE_ruby=y
-CONFIG_PACKAGE_ruby-yaml=y
+          # OpenClash
+          CONFIG_PACKAGE_luci-app-openclash=y
+          # CONFIG_PACKAGE_dnsmasq is not set
+          CONFIG_PACKAGE_dnsmasq-full=y
+          CONFIG_PACKAGE_kmod-tun=y
+          CONFIG_PACKAGE_kmod-inet-diag=y
+          CONFIG_PACKAGE_kmod-nft-tproxy=y
+          CONFIG_PACKAGE_kmod-nft-socket=y
+          CONFIG_PACKAGE_kmod-nft-nat=y
+          CONFIG_PACKAGE_iptables-nft=y
+          CONFIG_PACKAGE_ipset=y
+          CONFIG_PACKAGE_ruby=y
+          CONFIG_PACKAGE_ruby-yaml=y
 
-# Diagnostics
-CONFIG_PACKAGE_ethtool=y
-CONFIG_PACKAGE_iperf3=y
-CONFIG_PACKAGE_tcpdump=y
-CONFIG_PACKAGE_htop=y
-CONFIG_PACKAGE_lsof=y
-CONFIG_PACKAGE_tree=y
-CONFIG_PACKAGE_nano=y
-CONFIG_PACKAGE_openssh-sftp-server=y
+          # Diagnostics
+          CONFIG_PACKAGE_ethtool=y
+          CONFIG_PACKAGE_iperf3=y
+          CONFIG_PACKAGE_tcpdump=y
+          CONFIG_PACKAGE_htop=y
+          CONFIG_PACKAGE_lsof=y
+          CONFIG_PACKAGE_tree=y
+          CONFIG_PACKAGE_nano=y
+          CONFIG_PACKAGE_openssh-sftp-server=y
 
-# USB storage / filesystems
-CONFIG_PACKAGE_block-mount=y
-CONFIG_PACKAGE_fdisk=y
-CONFIG_PACKAGE_lsblk=y
-CONFIG_PACKAGE_parted=y
-CONFIG_PACKAGE_resize2fs=y
-CONFIG_PACKAGE_e2fsprogs=y
-CONFIG_PACKAGE_kmod-fs-ext4=y
-CONFIG_PACKAGE_kmod-fs-vfat=y
-CONFIG_PACKAGE_kmod-fs-exfat=y
-CONFIG_PACKAGE_kmod-fs-ntfs3=y
-CONFIG_PACKAGE_kmod-usb-storage=y
-CONFIG_PACKAGE_kmod-usb-storage-uas=y
+          # USB storage / filesystems
+          CONFIG_PACKAGE_block-mount=y
+          CONFIG_PACKAGE_fdisk=y
+          CONFIG_PACKAGE_lsblk=y
+          CONFIG_PACKAGE_parted=y
+          CONFIG_PACKAGE_resize2fs=y
+          CONFIG_PACKAGE_e2fsprogs=y
+          CONFIG_PACKAGE_kmod-fs-ext4=y
+          CONFIG_PACKAGE_kmod-fs-vfat=y
+          CONFIG_PACKAGE_kmod-fs-exfat=y
+          CONFIG_PACKAGE_kmod-fs-ntfs3=y
+          CONFIG_PACKAGE_kmod-usb-storage=y
+          CONFIG_PACKAGE_kmod-usb-storage-uas=y
 
-# x86 common NIC drivers
-CONFIG_PACKAGE_kmod-e1000=y
-CONFIG_PACKAGE_kmod-e1000e=y
-CONFIG_PACKAGE_kmod-igb=y
-CONFIG_PACKAGE_kmod-igc=y
-CONFIG_PACKAGE_kmod-r8169=y
-CONFIG_PACKAGE_kmod-tg3=y
-EOF
+          # x86 common NIC drivers
+          CONFIG_PACKAGE_kmod-e1000=y
+          CONFIG_PACKAGE_kmod-e1000e=y
+          CONFIG_PACKAGE_kmod-igb=y
+          CONFIG_PACKAGE_kmod-igc=y
+          CONFIG_PACKAGE_kmod-r8169=y
+          CONFIG_PACKAGE_kmod-tg3=y
+          EOF
+
+          # Strip the 10-space YAML indentation that leaked into .config via the heredoc
+          sed -i 's/^          //' .config
+
+          # Sanity check: every CONFIG_ line must be at column 0
+          if grep -nE '^[[:space:]]+CONFIG_' .config; then
+            echo "::error::Unexpected leading whitespace before CONFIG_ symbols in .config"
+            exit 1
+          fi
 
           if ! make defconfig >"$LOG" 2>&1; then
             echo "::error::make defconfig failed"
